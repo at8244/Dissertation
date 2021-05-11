@@ -1,0 +1,259 @@
+#Load necessary packages
+library(tidyverse)  
+library(sf)
+library(sp)
+library(rgdal)
+library(rgeos)
+library(tmap)
+library(tmaptools)
+library(spgwr)
+library(grid)
+library(gridExtra)
+library(car)
+library(psych)
+library(ggthemes)
+
+###Create OLS model for house price determinants in England
+
+##Uploading data
+#importing a shapefile 
+shp = readOGR(dsn = ".", layer = "lowerlayer")
+plot(lowerlayer)
+              
+#loading data
+engdataset <- read_excel("Desktop/Leeds /THIRD YEAR/DISSERTATION/R STUDIO /engdataset.xlsx")
+View(engdataset)
+summary(engdataset)
+var = as.data.frame(engdataset)
+head(var, 9)
+
+##correlation test
+cor.test(pwhite, houseprice2019, method = "pearson")
+#Repeat for all variables
+
+#Save 2019 OLS model as CSV file
+write.csv(summary(ols19), file = "coef_tab19.csv"))
+
+#OLS Model for 2020 England dataset
+ols20<-lm(houseprice2020~pcars+pstudents+pwhite+pdeprived+punemployed+psg+RU, data = engdataset)
+summary(ols20)
+write.csv(summary(ols20), file = "coef_tab20.csv"))
+
+#making ols with dummy variables
+yorkshire$RU0=0
+yorkshire$RU1=1
+attach(yorkshire)
+table(RU)
+
+dummy19<-lm(houseprice2019~pcars+pstudents+pwhite+pdeprived+punemployed+psg+urban1+urban2+urban3+rural1+rural2,data = dummys)
+summary(dummy19)
+write.csv(summary(dummy19), file = "dummy_tab19.csv"))
+
+dummy20<-lm(houseprice2020~pcars+pstudents+pwhite+pdeprived+punemployed+psg+urban1+urban2+urban3+rural1+rural2,data = dummys)
+summary(dummy20)
+write.csv(summary(dummy20), file = "dummy_tab20.csv"))
+
+###Create GWR model for house price determinants in Yorkshire
+
+#load dataset
+yorkshire <- read_excel("Desktop/Leeds /THIRD YEAR/DISSERTATION/R STUDIO /yorkshire.xlsx")
+View(yorkshire)
+summary(yorkshire)
+
+#create boundary file
+bf <- readOGR(".", "yorkshire")
+glimpse(bf)
+
+#converting to spatial
+york.sp = st_as_sf(yorkshire, coords = c("XLongitude", "YLatitude"), crs=27700)
+york.sp
+class(york.sp)
+york.spa = as(york.sp, "Spatial")
+
+#merge boundary file and dataset
+census <- merge(bf1, yorkshire, by.x="Name", by.y="Name")
+census2 <- st_as_sf(census)
+
+#OLS Model for 2019 Yorkshire dataset
+olsmodelyork19<-lm(houseprice2019~pcars+pstudents+pwhite+pdeprived+punemployed+psg,data = yorkshire)
+summary(olsmodelyork19)
+
+#Save as CSV file
+write.csv(summary(olsmodelyork19), file = "olsmodelyork19.csv")
+print(summary(olsmodelyork19, file= "olsmodelyork19.csv"))
+
+#Determine studentised residuals and attach to county
+s.resids <- rstudent(olsmodelyork19)
+yorkshire$s.resids = s.resids
+
+#Map Residuals for 2019
+ggplot(gwr.map)+
+  geom_sf(aes(fill=s.resids),lwd=0)+
+  scale_fill_distiller(palette = "Spectral")
+
+#Determine the optimal bandwidth for 2019 Yorkshire data
+GWRbandwidth <- gwr.sel(houseprice2019~pcars+pstudents+pwhite+pdeprived+punemployed+psg+RU, data = yorkshire, coords = cbind(XLongitude, YLatitude), adapt = T)
+GWRbandwidth
+
+#Create GWR model for 2019 Yorkshire data
+gwr.model = gwr(houseprice2019~pcars+pstudents+pwhite+pdeprived+punemployed+psg,
+                data = york.spa,
+                coords = cbind(XLongitude, YLatitude),
+                adapt=GWRbandwidth,
+                hatmatrix=TRUE,
+                se.fit=TRUE) 
+gwr.model
+
+#Save results as a data frame
+results19 <- as.data.frame(gwr.model$SDF)
+names(results19)
+
+#Compare GWR to OLS
+tab <- rbind(apply(gwr.model$SDF@data[, 1:8], 2, summary), coef(olsmodelyork19)) 
+rownames(tab)[7] <- "Global"
+tab <- round(tab, 3)
+t(tab)
+
+#Download Comparison Table as CSV file
+write.csv(t(tab), file = "coef_tabyork19.csv")
+
+#Map spatial variation of variables across Yorkshire 2019
+map <- tm_shape(gwr.map) +
+  tm_fill("pwhite",
+          n = 5,
+          style = "quantile",
+          title = "% White2019") +
+  tm_layout(frame = FALSE,
+            legend.text.size = 0.5,
+            legend.title.size = 0.6)
+map
+
+#Map GWR coefficients of Yorkshire 2019 dataset
+map2 <- tm_shape(gwr.map) +
+  tm_fill("pwhite.1",
+          n = 5,
+          style = "quantile",
+          title = "pwhite") +
+  tm_layout(frame = FALSE,
+            legend.text.size = 0.5,
+            legend.title.size = 0.6)
+map2
+#Repeat for all variables and save images
+
+#Map local significance of Variables
+#Determine which are significant 
+tval = gwr.map$pwhite_TV
+signif = tval < -1.96 | tval > 1.96 
+tm_shape(signif)+
+
+# map the significance 
+tm_shape(gwr.map) +
+  tm_fill("pwhite",midpoint = 0) + tm_style("natural")+ 
+  tm_layout(legend.position = c("left","bottom"))+
+  legend.title.size= 0.6,
+  legend.text.size= 0.5,
+# now add the tvalues layer
+  tm_shape(gwr.map[signif]) + tm_borders("grey40", lwd=0)
+
+#Repeat for all variables and save images
+
+###Repeat for Yorkshire 2020 dataset 
+
+#OLS Model for 2020 England dataset
+ols20<-lm(houseprice2020~pcars+pstudents+pwhite+pdeprived+punemployed+psg+RU, data = engdataset)
+summary(ols20)
+
+#Save as CSV file
+write.csv(summary(olsmodelyork20), file = "olsmodelyork20.csv")
+print(summary(olsmodelyork20, file= "olsmodelyork20.csv"))
+
+#Determine studentised residuals and attach to county
+s.resids2 <- rstudent(olsmodelyork20)
+yorkshire$s.resids2 = s.resids2
+
+#Map Residuals 
+gwr.map2 <-cbind(census2, as.matrix(results20))
+gwr.map222 <- st_as_sf(gwr.map2)
+qtm(gwr.map, fill = "localR2", borders = NULL)
+
+#Map Residuals for 2020
+ggplot(gwr.map2)+
+  geom_sf(aes(fill=s.resids),lwd=0)+
+  scale_fill_distiller(palette = "Spectral")
+
+#Determine the optimal bandwidth for 2019 Yorkshire data
+GWRbandwidth2 <- gwr.sel(houseprice2020~pcars+pstudents+pwhite+pdeprived+punemployed+psg+RU, data = yorkshire, coords = cbind(XLongitude, YLatitude), adapt = T)
+GWRbandwidth2
+
+#Create GWR model for 2020 Yorkshire data
+gwr.model2 = gwr(houseprice2020~pcars+pstudents+pwhite+pdeprived+punemployed+psg,
+                data = york.spa,
+                coords = cbind(XLongitude, YLatitude),
+                adapt=GWRbandwidth2,
+                hatmatrix=TRUE,
+                se.fit=TRUE) 
+gwr.model
+
+#Save results as a data frame
+results20 <- as.data.frame(gwr.model2$SDF)
+names(results20)
+
+#Compare GWR to OLS
+tab2 <- rbind(apply(gwr.model2$SDF@data[, 1:8], 2, summary), coef(olsmodelyork20)) 
+rownames(tab2)[7] <- "Global"
+tab2 <- round(tab2, 3)
+t(tab2)
+
+#Download Comparison Table as CSV file
+write.csv(t(tab2), file = "coef_tabyork20.csv")
+
+#Map spatial variation of variables across Yorkshire 2020
+map2 <- tm_shape(gwr.map2) +
+  tm_fill("pwhite",
+          n = 5,
+          style = "quantile",
+          title = "% White2020") +
+  tm_layout(frame = FALSE,
+            legend.text.size = 0.5,
+            legend.title.size = 0.6)
+map2
+
+#Map GWR coefficients of Yorkshire 2020 dataset
+map2 <- tm_shape(gwr.map222) +
+  tm_fill("pwhite.1",
+          n = 5,
+          style = "quantile",
+          title = "pwhite") +
+  tm_layout(frame = FALSE,
+            legend.text.size = 0.5,
+            legend.title.size = 0.6)
+map2
+
+#Repeat for all variables and save images
+
+#Map local significance of Variables
+#Determine which are significant 
+tval = gwr.map2$pwhite_TV
+signif = tval < -1.96 | tval > 1.96 
+tm_shape(signif2)+
+
+# map the significance 
+tm_shape(gwr.map222) +
+  tm_fill("pwhite",midpoint = 0) + tm_style("natural")+ 
+  tm_layout(legend.position = c("left","bottom"))+
+  legend.title.size= 0.6,
+  legend.text.size= 0.5,
+# now add the tvalues layer
+  tm_shape(gwr.map[signif2]) + tm_borders("grey40", lwd=0)
+
+#Repeat for all variables and save images
+
+##ols for yorkshire dummys - rural vs urban changes
+
+yorkshiredummy19<-lm(houseprice2019~pcars+pstudents+pwhite+pdeprived+punemployed+psg+urban1+urban2+urban3+rural1+rural2,data = yorkshire_dummy)
+summary(yorkshiredummy19)
+
+yorkshiredummy20<-lm(houseprice2020~pcars+pstudents+pwhite+pdeprived+punemployed+psg+urban1+urban2+urban3+rural1+rural2,data = yorkshire_dummy)
+summary(yorkshiredummy20)
+
+
